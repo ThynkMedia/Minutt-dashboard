@@ -1,0 +1,132 @@
+body {
+  margin: 0;
+  font-family: 'Poppins', sans-serif;
+  background: #f4f6f8;
+  color: #333;
+}
+
+.dashboard {
+  display: flex;
+  min-height: 100vh;
+}
+
+/* Sidebar */
+.sidebar {
+  width: 240px;
+  background: #2d3436;
+  color: #fff;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+}
+.sidebar .logo {
+  margin: 0 0 30px;
+  font-size: 22px;
+  text-align: center;
+}
+.sidebar ul {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  flex: 1;
+}
+.sidebar li {
+  margin: 15px 0;
+}
+.sidebar a {
+  color: #ccc;
+  text-decoration: none;
+  padding: 10px 15px;
+  display: block;
+  border-radius: 6px;
+}
+.sidebar a:hover {
+  background: #3e4547;
+  color: #fff;
+}
+.sidebar a.active {
+  background: #4CAF50;
+  color: #fff;
+}
+
+/* Main Content */
+.content {
+  flex: 1;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Sections */
+.section {
+  display: none;
+  margin-bottom: 30px;
+}
+.section.active {
+  display: block;
+}
+
+/* Card Style */
+.card {
+  background: #fff;
+  padding: 20px;
+  border-radius: 10px;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.1);
+}
+
+/* Tables */
+.table-container {
+  overflow-x: auto;
+  margin-top: 15px;
+}
+table {
+  width: 100%;
+  border-collapse: collapse;
+  background: #fff;
+}
+table th, table td {
+  padding: 12px;
+  border: 1px solid #ddd;
+  text-align: left;
+}
+table th {
+  background: #4CAF50;
+  color: white;
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+table tr:nth-child(even) {
+  background: #f9f9f9;
+}
+table img {
+  border-radius: 6px;
+}
+
+/* Forms */
+.form-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px;
+  margin-bottom: 15px;
+}
+form input, form select, form button {
+  padding: 10px;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+}
+form button {
+  cursor: pointer;
+  font-weight: bold;
+}
+.btn.green { background: #4CAF50; color: #fff; border: none; }
+.btn.green:hover { background: #45a049; }
+
+/* Footer */
+footer {
+  margin-top: auto;
+  text-align: center;
+  padding: 15px;
+  font-size: 14px;
+  color: #666;
+}
