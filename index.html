@@ -1,128 +1,85 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>MINUTT Admin Dashboard</title>
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
   <div class="dashboard">
+
     <!-- Sidebar -->
     <aside class="sidebar">
       <h2 class="logo">MINUTT Admin</h2>
       <ul>
         <li><a href="#" id="ordersLink" onclick="showSection('ordersSection')">📦 Orders</a></li>
         <li><a href="#" id="productsLink" onclick="showSection('productsSection')">🛒 Products</a></li>
-        <li><a href="#" id="categoriesLink" onclick="showSection('categoriesSection')">📂 Categories</a></li>
+        <li><a href="#" id="categoriesLink" onclick="showSection('categoriesSection')">🗂 Categories</a></li>
         <li><a href="#" id="settingsLink" onclick="showSection('settingsSection')">⚙ Settings</a></li>
       </ul>
     </aside>
 
-    <!-- Main Content -->
-    <main class="content">
-
-      <!-- Orders Section -->
-      <section id="ordersSection" class="section active card">
-        <h1>Orders Dashboard</h1>
-        <label for="statusFilter"><strong>Filter by Status:</strong></label>
-        <select id="statusFilter">
-          <option value="">All</option>
-          <option value="pending">Pending</option>
-          <option value="assigned">Assigned</option>
-          <option value="accepted">Accepted</option>
-          <option value="delivered">Delivered</option>
-          <option value="cancelled">Cancelled</option>
-        </select>
-        <div id="ordersContainer" class="table-container">
-          Loading...
+    <!-- Main -->
+    <main class="main">
+      <header class="main-header">
+        <h1>Dashboard</h1>
+        <div class="header-actions">
+          <input id="searchInput" placeholder="Search order # or customer" />
+          <select id="statusFilter">
+            <option value="">All status</option>
+            <option value="confirmed">Confirmed</option>
+            <option value="assigned">Assigned</option>
+            <option value="out_for_delivery">Out for delivery</option>
+            <option value="delivered">Delivered</option>
+            <option value="cancelled">Cancelled</option>
+          </select>
+          <select id="quickFilter">
+            <option value="all">All</option>
+            <option value="today">Today</option>
+            <option value="pending">Pending</option>
+            <option value="delivered">Delivered</option>
+          </select>
+          <button id="refreshBtn">Refresh</button>
         </div>
+      </header>
+
+      <section id="ordersSection" class="section active">
+        <h2>Orders</h2>
+        <div id="ordersContainer" class="orders-container"></div>
       </section>
 
-      <!-- Products Section -->
-      <section id="productsSection" class="section card">
-        <h1>Products Dashboard</h1>
-        <form id="addProductForm" class="form-grid">
-          <input type="text" id="productName" placeholder="Name *" required />
-          <input type="text" id="productDesc" placeholder="Description" />
-          <input type="number" id="productPrice" placeholder="Price *" step="0.01" required />
-          <select id="productCategory" required></select>
-          <input type="file" id="productImage" accept="image/*" required />
-          <input type="number" id="productStock" placeholder="Stock *" required />
-          <button type="submit" class="btn green">➕ Add Product</button>
-        </form>
-        <div class="table-container">
-          <table>
-            <thead>
-              <tr>
-                <th>ID</th><th>Name</th><th>Description</th><th>Price</th>
-                <th>Image</th><th>Category</th><th>Stock</th><th>Status</th><th>Actions</th>
-              </tr>
-            </thead>
-            <tbody id="products-table-body"><tr><td colspan="9">Loading...</td></tr></tbody>
-          </table>
-        </div>
+      <section id="productsSection" class="section">
+        <h2>Products</h2>
+        <table class="full-table">
+          <thead><tr><th>ID</th><th>Name</th><th>Price</th><th>Image</th><th>Category</th><th>Stock</th><th>Status</th></tr></thead>
+          <tbody id="products-table-body"></tbody>
+        </table>
       </section>
 
-      <!-- Categories Section -->
-      <section id="categoriesSection" class="section card">
-        <h1>Categories Dashboard</h1>
-        <form id="addCategoryForm" class="form-grid">
-          <input type="text" id="categoryName" placeholder="Name *" required />
-          <input type="text" id="categoryDesc" placeholder="Description" />
-          <input type="file" id="categoryImage" accept="image/*" required />
-          <button type="submit" class="btn green">➕ Add Category</button>
-        </form>
-        <div class="table-container">
-          <table>
-            <thead>
-              <tr><th>ID</th><th>Name</th><th>Description</th><th>Image</th><th>Actions</th></tr>
-            </thead>
-            <tbody id="categories-table-body"><tr><td colspan="5">Loading...</td></tr></tbody>
-          </table>
-        </div>
+      <section id="categoriesSection" class="section">
+        <h2>Categories</h2>
+        <table class="full-table">
+          <thead><tr><th>ID</th><th>Name</th><th>Description</th><th>Image</th><th>Actions</th></tr></thead>
+          <tbody id="categories-table-body"></tbody>
+        </table>
       </section>
 
-      <!-- Settings Section -->
-      <section id="settingsSection" class="section card">
-        <h1>App Settings</h1>
-
-        <!-- Delivery Fee -->
-        <form id="deliveryFeeForm" class="form-grid">
-          <input type="number" id="deliveryFee" placeholder="Delivery Fee ₹" required />
-          <button type="submit" class="btn green">💾 Save Fee</button>
+      <section id="settingsSection" class="section">
+        <h2>Settings</h2>
+        <form id="deliveryFeeForm">
+          <label>Delivery Fee: ₹ <input id="deliveryFee" /></label>
+          <button type="submit">Save</button>
         </form>
-
-        <!-- Banner Upload -->
-        <form id="bannerForm" class="form-grid">
-          <label>Upload Home Banner:</label>
-          <input type="file" id="bannerImage" accept="image/*" required />
-          <button type="submit" class="btn green">💾 Save Banner</button>
-        </form>
-
-        <div id="bannerPreview" style="margin-top:10px;"></div>
+        <div id="bannerPreview"></div>
       </section>
-
-      <!-- Footer -->
-      <footer>
-        © MINUTT 2025 – Admin Dashboard
-      </footer>
     </main>
   </div>
 
-  <script src="app.js" type="module"></script>
-  <script>
-    // Sidebar Navigation with Active Highlight
-    function showSection(id) {
-      document.querySelectorAll('.section').forEach(sec => sec.classList.remove('active'));
-      document.getElementById(id).classList.add('active');
+  <!-- audio + toast container -->
+  <audio id="newOrderAudio" src="new-order.mp3" preload="auto"></audio>
+  <div id="toastRoot" aria-live="polite" style="position:fixed;right:14px;top:14px;z-index:9999;"></div>
 
-      document.querySelectorAll('.sidebar a').forEach(link => link.classList.remove('active'));
-      if (id === 'ordersSection') document.getElementById('ordersLink').classList.add('active');
-      if (id === 'productsSection') document.getElementById('productsLink').classList.add('active');
-      if (id === 'categoriesSection') document.getElementById('categoriesLink').classList.add('active');
-      if (id === 'settingsSection') document.getElementById('settingsLink').classList.add('active');
-    }
-  </script>
+  <script type="module" src="app.js"></script>
 </body>
 </html>

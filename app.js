@@ -1,579 +1,536 @@
+// app.js - MINUTT Admin (stable)
+// Replace this file entirely. Uses Supabase JS ESM CDN.
+
 import { createClient } from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js/+esm";
 
-// 🔑 Replace with your Supabase credentials
+// ---------- CONFIG (keep your keys)
 const SUPABASE_URL = "https://dhfllljsncnjelftzisk.supabase.co";
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRoZmxsbGpzbmNuamVsZnR6aXNrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDc4ODczOTUsImV4cCI6MjA2MzQ2MzM5NX0.EFl0NEiMwp3qM_hX_iFJoZHgV2EEERfpSmmBhjTZNuE";
-const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-window.supabase = supabase;
 
-
-// -------------------- IMAGE UPLOAD HELPER -------------------- //
-async function uploadImage(file, folder = "uploads") {
-  const fileName = `${folder}/${Date.now()}_${file.name}`;
-  const { error } = await supabase.storage
-    .from("minutt-media")
-    .upload(fileName, file);
-
-  if (error) {
-    console.error("❌ Image upload failed:", error.message);
-    return null;
-  }
-
-  const { data: urlData } = supabase.storage
-    .from("minutt-media")
-    .getPublicUrl(fileName);
-
-  return urlData?.publicUrl || null;
+let supabase = null;
+try {
+  supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+  window.supabase = supabase;
+} catch (err) {
+  console.error("Failed to init Supabase client:", err);
+  // show UI message
+  document.addEventListener("DOMContentLoaded", () => {
+    const c = document.getElementById("ordersContainer");
+    if (c) c.innerHTML = "<p style='color:red'>Data client failed to initialize - check console.</p>";
+  });
 }
 
-// -------------------- RIDERS -------------------- //
+// ---------- small helpers
 async function fetchRiders() {
+  if (!supabase) return [];
   try {
     const { data, error } = await supabase.from("riders").select("*");
-    if (error) {
-      console.error("❌ Failed to fetch riders:", error.message);
-      return [];
-    }
+    if (error) { console.warn("fetchRiders error:", error); return []; }
     return data || [];
   } catch (e) {
-    console.error("❌ fetchRiders exception:", e);
+    console.error("fetchRiders exception:", e);
     return [];
   }
 }
 
-// -------------------- ORDERS -------------------- //
-async function fetchOrders() {
-  const filterEl = document.getElementById("statusFilter");
-  if (!filterEl) return;
-
+function safeParseItems(order) {
   try {
-    let query = supabase.from("orders").select("*, order_items(*)").order("created_at", { ascending: false });
-    if (filterEl.value) query = query.eq("status", filterEl.value);
-
-    const { data: orders, error } = await query;
-    const riders = await fetchRiders();
-    const ordersContainer = document.getElementById("ordersContainer");
-    const tableBody = document.getElementById("orders-table-body");
-
-    if (ordersContainer) ordersContainer.innerHTML = "";
-    if (tableBody) tableBody.innerHTML = "";
-
-    if (error) {
-      if (tableBody) tableBody.innerHTML = `<tr><td colspan="7">Error loading orders</td></tr>`;
-      if (ordersContainer) ordersContainer.innerHTML = "❌ Error loading orders";
-      console.error("❌ fetchOrders error:", error.message);
-      return;
-    }
-
-    if (!orders || orders.length === 0) {
-      if (tableBody) tableBody.innerHTML = `<tr><td colspan="7">No orders found</td></tr>`;
-      if (ordersContainer) ordersContainer.innerHTML = "No orders found";
-      return;
-    }
-
-    orders.forEach(order => {
-      // Build items HTML
-      let itemsHTML = "";
-      if (order.order_items && order.order_items.length > 0) {
-        itemsHTML = `
-          <ul>
-            ${order.order_items.map(item => `
-              <li>${item.product_name} (x${item.quantity}) - ₹${item.price}</li>
-            `).join("")}
-          </ul>
-        `;
-      } else {
-        itemsHTML = "<p>No items found</p>";
-      }
-
-      // If using table view
-      if (tableBody) {
-        const row = document.createElement("tr");
-        row.innerHTML = `
-          <td>${order.id}</td>
-          <td>${order.customer_name}</td>
-          <td>${order.customer_phone}</td>
-          <td>${order.customer_address}</td>
-          <td>₹${order.order_amount}</td>
-          <td>${order.status}</td>
-          <td>${order.created_at ? new Date(order.created_at).toLocaleString() : ""}</td>
-        `;
-        tableBody.appendChild(row);
-      }
-
-      // If using card/container view
-      if (ordersContainer) {
-        ordersContainer.innerHTML += `
-          <div class="card">
-            <h3>Order #${order.id}</h3>
-            <p><strong>Name:</strong> ${order.customer_name}</p>
-            <p><strong>Phone:</strong> ${order.customer_phone}</p>
-            <p><strong>Address:</strong> ${order.customer_address}</p>
-            <p><strong>Total:</strong> ₹${order.order_amount}</p>
-            <p><strong>Status:</strong> ${order.status}</p>
-            <p><strong>Items:</strong></p>
-            ${itemsHTML}
-            <label>Assign Rider:</label>
-            <select onchange="assignRider(${order.id}, this.value)">
-              <option value="">-- Select Rider --</option>
-              ${riders.map(r => `
-                <option value="${r.id}" ${order.rider_id === r.id ? "selected" : ""}>
-                  ${r.name} (${r.status})
-                </option>`).join("")}
-            </select>
-          </div>
-        `;
-      }
-    });
+    if (!order) return [];
+    if (Array.isArray(order.order_items)) return order.order_items;
+    if (typeof order.order_items === "string") return JSON.parse(order.order_items);
+    if (Array.isArray(order.items)) return order.items;
+    if (typeof order.items === "string") return JSON.parse(order.items);
   } catch (e) {
-    console.error("❌ fetchOrders exception:", e);
+    console.error("safeParseItems:", e);
   }
+  return [];
 }
 
-window.assignRider = async function(orderId, riderId) {
-  if (!riderId) return;
+function escapeHtml(str) {
+  if (str === null || str === undefined) return "";
+  return String(str).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#039;");
+}
 
-  try {
-    // Update order
-    const { error: orderError } = await supabase
-      .from("orders")
-      .update({ rider_id: riderId, status: "assigned", assigned_at: new Date() })
-      .eq("id", orderId);
-
-    if (orderError) {
-      alert("❌ Failed to assign order: " + orderError.message);
-      return;
-    }
-
-    // Update rider
-    const { error: riderError } = await supabase
-      .from("riders")
-      .update({ status: "busy" })
-      .eq("id", riderId);
-
-    if (riderError) {
-      alert("❌ Failed to update rider: " + riderError.message);
-      return;
-    }
-
-    alert("✅ Rider assigned!");
-    fetchOrders();
-  } catch (e) {
-    console.error("❌ assignRider exception:", e);
-    alert("❌ Something went wrong while assigning rider.");
-  }
+// ---------- UI helpers
+window.showSection = function(sectionId) {
+  document.querySelectorAll(".section").forEach(s => s.classList.remove("active"));
+  const sec = document.getElementById(sectionId);
+  if (sec) sec.classList.add("active");
+  document.querySelectorAll(".sidebar a").forEach(a => a.classList.remove("active-link"));
+  const map = { ordersSection: "ordersLink", productsSection: "productsLink", categoriesSection: "categoriesLink", settingsSection: "settingsLink" };
+  const lid = map[sectionId];
+  if (lid) document.getElementById(lid)?.classList.add("active-link");
 };
 
-if (document.getElementById("statusFilter")) {
-  document.getElementById("statusFilter").addEventListener("change", fetchOrders);
-  fetchOrders();
+// ---------- Toast (non-blocking)
+function showToast(message, ms = 1200) {
+  const root = document.getElementById("toastRoot");
+  if (!root) return;
+  const t = document.createElement("div");
+  t.className = "toast";
+  t.textContent = message;
+  root.appendChild(t);
+  // show
+  requestAnimationFrame(()=> t.classList.add("show"));
+  setTimeout(()=> { t.classList.remove("show"); setTimeout(()=> t.remove(), 220); }, ms);
 }
 
-// -------------------- CATEGORIES -------------------- //
-async function fetchCategories() {
-  if (!document.getElementById("categories-table-body")) return;
+// ---------- Orders (Option C polling)
+let lastSeenTopId = null;
+let pollHandle = null;
+const POLL_MS = 8000;
 
-  try {
-    const { data: categories, error } = await supabase
-      .from("categories")
-      .select("*")
-      .order("created_at", { ascending: false });
+async function renderOrders(orders) {
+  const container = document.getElementById("ordersContainer");
+  if (!container) return;
+  container.innerHTML = "";
 
-    const tableBody = document.getElementById("categories-table-body");
-    tableBody.innerHTML = "";
+  const quickEl = document.getElementById("quickFilter");
+  const searchEl = document.getElementById("searchInput");
+  const statusEl = document.getElementById("statusFilter");
+  const quick = quickEl ? quickEl.value : "all";
+  const search = searchEl ? searchEl.value.trim().toLowerCase() : "";
+  const statusFilterValue = statusEl ? statusEl.value : "";
 
-    if (error) {
-      tableBody.innerHTML = `<tr><td colspan="5">Error loading categories</td></tr>`;
-      console.error("❌ fetchCategories error:", error.message);
-      return;
+  const riders = await fetchRiders();
+
+  const filtered = (orders || []).filter(order => {
+    if (statusFilterValue && String(order.status) !== statusFilterValue) return false;
+    if (quick === "today") {
+      if (!order.created_at) return false;
+      if (new Date(order.created_at).toDateString() !== new Date().toDateString()) return false;
+    } else if (quick === "pending") {
+      if (!["confirmed","assigned","out_for_delivery"].includes(order.status)) return false;
+    } else if (quick === "delivered") {
+      if (order.status !== "delivered") return false;
     }
-
-    if (!categories || categories.length === 0) {
-      tableBody.innerHTML = `<tr><td colspan="5">No categories found</td></tr>`;
-      return;
+    if (search) {
+      const needles = [String(order.order_number||"").toLowerCase(), String(order.customer_name||"").toLowerCase(), String(order.customer_phone||"").toLowerCase()];
+      if (!needles.some(n => n.includes(search))) return false;
     }
-
-    categories.forEach(cat => {
-      const row = document.createElement("tr");
-      row.innerHTML = `
-        <td>${cat.id}</td>
-        <td>${cat.name}</td>
-        <td>${cat.description || ""}</td>
-        <td><img src="${cat.image_url}" alt="category" width="50"></td>
-        <td>
-          <button onclick="editCategory(${cat.id})">✏ Edit</button>
-          <button onclick="deleteCategory(${cat.id})">🗑 Delete</button>
-        </td>
-      `;
-      tableBody.appendChild(row);
-    });
-  } catch (e) {
-    console.error("❌ fetchCategories exception:", e);
-  }
-}
-
-if (document.getElementById("addCategoryForm")) {
-  document.getElementById("addCategoryForm").addEventListener("submit", async (e) => {
-    e.preventDefault();
-
-    const name = document.getElementById("categoryName").value;
-    const description = document.getElementById("categoryDesc").value;
-    const file = document.getElementById("categoryImage").files[0];
-
-    const image_url = file ? await uploadImage(file, "categories") : null;
-
-    try {
-      const { error } = await supabase
-        .from("categories")
-        .insert([{ name, description, image_url }]);
-
-      if (error) {
-        alert("❌ Failed to add category: " + error.message);
-      } else {
-        alert("✅ Category added!");
-        document.getElementById("addCategoryForm").reset();
-        fetchCategories();
-      }
-    } catch (e) {
-      console.error("❌ addCategory exception:", e);
-    }
+    return true;
   });
 
-  fetchCategories();
+  if (!filtered.length) {
+    container.innerHTML = "<p>No orders found</p>";
+    return;
+  }
+
+  filtered.forEach(order => {
+    const items = safeParseItems(order) || [];
+    const displayId = order.order_number || order.id;
+    const domId = `order-${order.id}`;
+    const total = order.order_amount ?? order.total ?? 0;
+    const isDelivered = order.status === "delivered";
+
+    // build items HTML
+    let itemsHtml = "";
+    if (items.length) {
+      items.forEach(item => {
+        const name = escapeHtml(item.name || item.product_name || "Unnamed");
+        const price = Number(item.price || 0);
+        const qty = Number(item.quantity ?? item.cartQuantity ?? 1);
+        const img = escapeHtml(item.imageUrl || item.image_url || "");
+        itemsHtml += '<div class="order-item">' +
+                       `<img src="${img}" class="item-img" />` +
+                       '<div class="item-info">' +
+                         `<p class="item-name">${name}</p>` +
+                         `<p class="item-meta">₹${price} × ${qty}</p>` +
+                       '</div>' +
+                       `<div class="item-total">₹${price * qty}</div>` +
+                     '</div>';
+      });
+    } else {
+      itemsHtml = "<p>No items found</p>";
+    }
+
+    const deliveredBadge = isDelivered ? '<span class="delivered-badge">✔ Delivered</span>' : "";
+
+    // insert card
+    const cardHtml =
+      '<div class="order-card" id="' + domId + '">' +
+        '<div class="order-header">' +
+          '<div style="flex:1;">' +
+            '<h3>Order #' + escapeHtml(String(displayId)) + '</h3>' +
+            '<div class="meta">' +
+              '<div><strong>' + escapeHtml(order.customer_name || "-") + '</strong></div>' +
+              '<div>' + escapeHtml(order.customer_phone || "-") + '</div>' +
+              '<div style="max-width:560px">' + escapeHtml(order.customer_address || "-") + '</div>' +
+            '</div>' +
+          '</div>' +
+          '<div style="text-align:right;display:flex;flex-direction:column;align-items:flex-end;gap:8px;">' +
+            '<div style="font-weight:800">₹' + escapeHtml(String(total)) + '</div>' +
+            '<div style="display:flex;gap:8px;align-items:center;">' +
+              '<div class="item-badge">' + items.length + ' items</div>' +
+              deliveredBadge +
+            '</div>' +
+          '</div>' +
+        '</div>' +
+
+        '<div style="margin-top:10px;">' +
+          '<button class="btn-outline small" onclick="toggleItems(this,' + order.id + ')">Show Items</button>' +
+          '<button class="btn-outline small" onclick="printInvoice(' + order.id + ')">Print Invoice</button>' +
+          '<label style="margin-left:12px;"><strong>Assign Rider:</strong></label>' +
+          '<select onchange="assignRider(' + order.id + ', this.value)">' +
+            '<option value="">-- Select Rider --</option>' +
+            riders.map(r => '<option value="' + r.id + '"' + (order.rider_id === r.id ? ' selected' : '') + '>' + escapeHtml(r.name + ' (' + (r.status||'') + ')') + '</option>').join('') +
+          '</select>' +
+          '<div class="order-actions" style="margin-top:8px;">' +
+            '<button class="delivered-btn" onclick="markDelivered(' + order.id + ')">Mark as Delivered</button>' +
+            '<button class="delete-btn" onclick="deleteOrder(' + order.id + ')">Delete Order</button>' +
+          '</div>' +
+        '</div>' +
+
+        '<div id="items-block-' + order.id + '" class="items-container">' +
+          '<div class="order-items">' + itemsHtml + '</div>' +
+        '</div>' +
+      '</div>';
+
+    container.insertAdjacentHTML("beforeend", cardHtml);
+  });
 }
 
-window.deleteCategory = async function (id) {
-  if (!confirm("Are you sure you want to delete this category?")) return;
+async function fetchOrdersFromServer({ render = true } = {}) {
+  if (!supabase) return [];
   try {
-    const { error } = await supabase.from("categories").delete().eq("id", id);
-    if (error) {
-      alert("❌ Failed to delete category: " + error.message);
-    } else {
-      alert("✅ Category deleted!");
-      fetchCategories();
-    }
-  } catch (e) {
-    console.error("❌ deleteCategory exception:", e);
-  }
-};
+    const statusEl = document.getElementById("statusFilter");
+    let query = supabase.from("orders").select("*").order("created_at", { ascending: false });
+    if (statusEl && statusEl.value) query = query.eq("status", statusEl.value);
 
-window.editCategory = async function (id) {
-  try {
-    const { data: category, error } = await supabase.from("categories").select("*").eq("id", id).single();
-    if (error || !category) {
-      alert("❌ Failed to fetch category details");
-      return;
-    }
-    const newName = prompt("Enter new category name:", category.name);
-    const newDesc = prompt("Enter new category description:", category.description || "");
-    const fileInput = document.createElement("input");
-    fileInput.type = "file";
-    fileInput.accept = "image/*";
-    let newImageUrl = null;
-    fileInput.onchange = async () => {
-      const file = fileInput.files[0];
-      if (file) newImageUrl = await uploadImage(file, "categories");
-      const { error: updateError } = await supabase
-        .from("categories")
-        .update({
-          name: newName,
-          description: newDesc,
-          image_url: newImageUrl || category.image_url,
-        })
-        .eq("id", id);
-      if (updateError) {
-        alert("❌ Failed to update category: " + updateError.message);
-      } else {
-        alert("✅ Category updated!");
-        fetchCategories();
+    const { data: orders, error } = await query;
+    if (error) {
+      console.error("fetchOrdersFromServer error:", error);
+      if (render) {
+        const c = document.getElementById("ordersContainer");
+        if (c) c.innerHTML = "<p style='color:red'>Error loading orders</p>";
       }
-    };
-    fileInput.click();
+      return [];
+    }
+
+    const topId = orders && orders.length ? (orders[0].id || orders[0].order_number) : null;
+    if (render) {
+      await renderOrders(orders);
+      lastSeenTopId = topId;
+    }
+    return orders || [];
   } catch (e) {
-    console.error("❌ editCategory exception:", e);
+    console.error("fetchOrdersFromServer exception:", e);
+    return [];
+  }
+}
+
+// background poll (Option C): only render when top id changed and user is not interacting
+function startBackgroundPoll() {
+  if (!supabase) return;
+  if (pollHandle) clearInterval(pollHandle);
+  pollHandle = setInterval(async () => {
+    try {
+      const { data: rows } = await supabase.from("orders").select("id, order_number").order("created_at", { ascending: false }).limit(1);
+      const topId = rows && rows.length ? (rows[0].id || rows[0].order_number) : null;
+      const userInteracting = document.activeElement && ["INPUT","SELECT","TEXTAREA"].includes(document.activeElement.tagName);
+      if (topId && topId !== lastSeenTopId && !userInteracting) {
+        // play sound + toast only (no blocking alert)
+        const audio = document.getElementById("newOrderAudio");
+        if (audio) { audio.currentTime = 0; audio.play().catch(()=>{}); }
+        showToast("🔔 New order received!");
+        // re-render orders
+        await fetchOrdersFromServer({ render: true });
+      }
+    } catch (e) {
+      console.error("background poll error:", e);
+    }
+  }, POLL_MS);
+}
+
+// ---------- actions
+window.toggleItems = function(btn, orderId) {
+  try {
+    let el = null;
+    if (orderId !== undefined && orderId !== null) el = document.getElementById("items-block-" + orderId);
+    if (!el && btn && btn.closest) {
+      const card = btn.closest(".order-card");
+      if (card) el = card.querySelector(".items-container");
+    }
+    if (!el) el = document.querySelector(".items-container");
+    if (!el) return;
+    const open = el.classList.toggle("open");
+    if (btn) btn.textContent = open ? "Hide Items" : "Show Items";
+  } catch (e) {
+    console.error("toggleItems error:", e);
   }
 };
 
-// -------------------- PRODUCTS -------------------- //
-async function fetchCategoriesDropdown() {
-  const dropdown = document.getElementById("productCategory");
-  if (!dropdown) return;
+window.assignRider = async function(orderId, riderId) {
+  if (!orderId) return;
+  if (!riderId) return;
   try {
-    const { data: categories, error } = await supabase.from("categories").select("*");
-    if (error) {
-      console.error("❌ Failed to fetch categories:", error.message);
-      return;
-    }
-    dropdown.innerHTML = "";
-    categories.forEach(cat => {
-      const option = document.createElement("option");
-      option.value = cat.id;
-      option.textContent = cat.name;
-      dropdown.appendChild(option);
-    });
+    const { error } = await supabase.from("orders").update({ rider_id: riderId, status: "assigned", assigned_at: new Date().toISOString() }).eq("id", orderId);
+    if (error) return console.warn("assignRider failed:", error);
+    // update rider status best-effort
+    await supabase.from("riders").update({ status: "busy" }).eq("id", riderId).catch(()=>{});
+    fetchOrdersFromServer({ render: true });
   } catch (e) {
-    console.error("❌ fetchCategoriesDropdown exception:", e);
+    console.error("assignRider exception:", e);
   }
+};
+
+window.markDelivered = async function(orderId) {
+  if (!orderId) return;
+  try {
+    const { error } = await supabase.from("orders").update({ status: "delivered", delivered_at: new Date().toISOString() }).eq("id", orderId);
+    if (error) return console.warn("markDelivered failed:", error);
+    const card = document.getElementById("order-" + orderId);
+    if (card && !card.querySelector(".delivered-badge")) {
+      const b = document.createElement("span");
+      b.className = "delivered-badge";
+      b.textContent = "✔ Delivered";
+      card.querySelector(".order-header").appendChild(b);
+    }
+    fetchOrdersFromServer({ render: true });
+  } catch (e) {
+    console.error("markDelivered:", e);
+  }
+};
+
+window.deleteOrder = async function(orderId) {
+  if (!orderId) return;
+  if (!confirm("Delete this order permanently?")) return;
+  try {
+    const { error } = await supabase.from("orders").delete().eq("id", orderId);
+    if (error) return console.warn("deleteOrder failed:", error);
+    const card = document.getElementById("order-" + orderId);
+    if (card) card.remove();
+    fetchOrdersFromServer({ render: true });
+  } catch (e) {
+    console.error("deleteOrder:", e);
+  }
+};
+
+window.printInvoice = function(orderId) {
+  try {
+    const card = document.getElementById("order-" + orderId);
+    if (!card) return;
+    const title = card.querySelector("h3")?.textContent || `Order ${orderId}`;
+    const meta = card.querySelectorAll(".meta div");
+    const name = meta[0]?.textContent || "";
+    const phone = meta[1]?.textContent || "";
+    const address = meta[2]?.textContent || "";
+    const itemsBlock = card.querySelector(".order-items");
+    const itemsHTML = itemsBlock ? itemsBlock.outerHTML : "<p>No items</p>";
+
+    const win = window.open("", "_blank", "width=800,height=900");
+    if (!win) return;
+    // write a plain-safe string (no template literal injections)
+    const html = '<html><head><title>' + escapeHtml(title) + '</title>' +
+      '<style>body{font-family:Arial;padding:16px}.line{display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px dashed #ddd;}</style>' +
+      '</head><body>' +
+      '<h2>' + escapeHtml(title) + '</h2>' +
+      '<div class="line"><strong>Customer</strong><div>' + escapeHtml(name) + '</div></div>' +
+      '<div class="line"><strong>Phone</strong><div>' + escapeHtml(phone) + '</div></div>' +
+      '<div class="line"><strong>Address</strong><div>' + escapeHtml(address) + '</div></div>' +
+      '<h3>Items</h3>' + itemsHTML +
+      '<script>window.onload=function(){window.print();}</script>' +
+      '</body></html>';
+    win.document.open();
+    win.document.write(html);
+    win.document.close();
+  } catch (e) {
+    console.error("printInvoice error:", e);
+  }
+};
+
+// ---------- initial wiring
+document.addEventListener("DOMContentLoaded", () => {
+  const refreshBtn = document.getElementById("refreshBtn");
+  const searchInput = document.getElementById("searchInput");
+  const statusFilter = document.getElementById("statusFilter");
+  const quickFilter = document.getElementById("quickFilter");
+
+  if (refreshBtn) refreshBtn.addEventListener("click", () => fetchOrdersFromServer({ render: true }));
+  if (searchInput) searchInput.addEventListener("input", () => fetchOrdersFromServer({ render: true }));
+  if (statusFilter) statusFilter.addEventListener("change", () => fetchOrdersFromServer({ render: true }));
+  if (quickFilter) quickFilter.addEventListener("change", () => fetchOrdersFromServer({ render: true }));
+
+  // load other sections
+  fetchCategories();
+  fetchProducts();
+  fetchCategoriesDropdown();
+  fetchDeliveryFee();
+  fetchBanner();
+
+  // initial fetch & start polling
+  fetchOrdersFromServer({ render: true }).then(() => startBackgroundPoll());
+});
+
+// ---------- categories / products / settings / banner
+async function fetchCategories() {
+  if (!supabase) return;
+  try {
+    const tableBody = document.getElementById("categories-table-body");
+    if (!tableBody) return;
+    const { data, error } = await supabase.from("categories").select("*").order("created_at", { ascending: false });
+    if (error) { tableBody.innerHTML = `<tr><td colspan="5">Error loading categories</td></tr>`; return; }
+    tableBody.innerHTML = "";
+    (data || []).forEach(cat => {
+      const row = document.createElement("tr");
+      row.innerHTML = '<td>' + cat.id + '</td>' +
+                      '<td>' + escapeHtml(cat.name) + '</td>' +
+                      '<td>' + escapeHtml(cat.description || "") + '</td>' +
+                      '<td><img src="' + escapeHtml(cat.image_url || "") + '" width="50" /></td>' +
+                      '<td><button onclick="editCategory(' + cat.id + ')">✏ Edit</button> <button onclick="deleteCategory(' + cat.id + ')">🗑 Delete</button></td>';
+      tableBody.appendChild(row);
+    });
+  } catch (e) { console.error("fetchCategories:", e); }
+}
+
+async function fetchCategoriesDropdown() {
+  if (!supabase) return;
+  try {
+    const dropdown = document.getElementById("productCategory");
+    if (!dropdown) return;
+    const { data } = await supabase.from("categories").select("*");
+    dropdown.innerHTML = "";
+    (data || []).forEach(cat => {
+      const opt = document.createElement("option");
+      opt.value = cat.id;
+      opt.textContent = cat.name;
+      dropdown.appendChild(opt);
+    });
+  } catch (e) { console.error("fetchCategoriesDropdown:", e); }
 }
 
 async function fetchProducts() {
-  if (!document.getElementById("products-table-body")) return;
+  if (!supabase) return;
   try {
-    const { data: products, error } = await supabase
-      .from("products")
-      .select("*, categories(name)")
-      .order("created_at", { ascending: false });
     const tableBody = document.getElementById("products-table-body");
+    if (!tableBody) return;
+    const { data, error } = await supabase.from("products").select("*, categories(name)").order("created_at", { ascending: false });
+    if (error) { tableBody.innerHTML = `<tr><td colspan="9">Error loading products</td></tr>`; return; }
     tableBody.innerHTML = "";
-    if (error) {
-      tableBody.innerHTML = `<tr><td colspan="9">Error loading products</td></tr>`;
-      console.error("❌ fetchProducts error:", error.message);
-      return;
-    }
-    if (!products || products.length === 0) {
-      tableBody.innerHTML = `<tr><td colspan="9">No products found</td></tr>`;
-      return;
-    }
-    products.forEach(product => {
+    (data || []).forEach(product => {
       const row = document.createElement("tr");
-      row.innerHTML = `
-        <td>${product.id}</td>
-        <td>${product.name}</td>
-        <td>${product.description || ""}</td>
-        <td>₹${product.price}</td>
-        <td><img src="${product.image_url}" alt="product" width="50"></td>
-        <td>${product.categories ? product.categories.name : "Uncategorized"}</td>
-        <td>${product.stock}</td>
-        <td>${product.status}</td>
-        <td>
-          <button onclick="editProduct(${product.id})">✏ Edit</button>
-          <button onclick="deleteProduct(${product.id})">🗑 Delete</button>
-        </td>
-      `;
+      row.innerHTML = '<td>' + product.id + '</td>' +
+                      '<td>' + escapeHtml(product.name) + '</td>' +
+                      '<td>' + escapeHtml(product.description || "") + '</td>' +
+                      '<td>₹' + (product.price || 0) + '</td>' +
+                      '<td><img src="' + escapeHtml(product.image_url || "") + '" width="50" /></td>' +
+                      '<td>' + escapeHtml(product.categories ? product.categories.name : "Uncategorized") + '</td>' +
+                      '<td>' + escapeHtml(String(product.stock || "")) + '</td>' +
+                      '<td>' + escapeHtml(product.status || "") + '</td>';
       tableBody.appendChild(row);
     });
-  } catch (e) {
-    console.error("❌ fetchProducts exception:", e);
-  }
+  } catch (e) { console.error("fetchProducts:", e); }
 }
 
-if (document.getElementById("addProductForm")) {
-  document.getElementById("addProductForm").addEventListener("submit", async (e) => {
-    e.preventDefault();
-    try {
-      const name = document.getElementById("productName").value;
-      const description = document.getElementById("productDesc").value;
-      const price = parseFloat(document.getElementById("productPrice").value);
-      const stock = parseInt(document.getElementById("productStock").value);
-      const category_id = parseInt(document.getElementById("productCategory").value);
-      const file = document.getElementById("productImage").files[0];
-      const image_url = file ? await uploadImage(file, "products") : null;
-      const { error } = await supabase
-        .from("products")
-        .insert([{ name, description, price, stock, category_id, image_url, status: "active" }]);
-      if (error) {
-        alert("❌ Failed to add product: " + error.message);
-      } else {
-        alert("✅ Product added!");
-        document.getElementById("addProductForm").reset();
-        fetchProducts();
-      }
-    } catch (e) {
-      console.error("❌ addProduct exception:", e);
-    }
-  });
-  fetchCategoriesDropdown();
-  fetchProducts();
-}
-
-window.deleteProduct = async function (id) {
-  if (!confirm("Are you sure you want to delete this product?")) return;
-  try {
-    const { error } = await supabase.from("products").delete().eq("id", id);
-    if (error) {
-      alert("❌ Failed to delete product: " + error.message);
-    } else {
-      alert("✅ Product deleted!");
-      fetchProducts();
-    }
-  } catch (e) {
-    console.error("❌ deleteProduct exception:", e);
-  }
-};
-
-window.editProduct = async function (id) {
-  try {
-    const { data: product, error } = await supabase.from("products").select("*").eq("id", id).single();
-    if (error || !product) {
-      alert("❌ Failed to fetch product details");
-      return;
-    }
-    const newName = prompt("Enter new product name:", product.name);
-    const newDesc = prompt("Enter new description:", product.description || "");
-    const newPrice = prompt("Enter new price:", product.price);
-    const newStock = prompt("Enter new stock:", product.stock);
-    const newStatus = prompt("Enter new status (active/inactive):", product.status);
-    const fileInput = document.createElement("input");
-    fileInput.type = "file";
-    fileInput.accept = "image/*";
-    let newImageUrl = null;
-    fileInput.onchange = async () => {
-      const file = fileInput.files[0];
-      if (file) newImageUrl = await uploadImage(file, "products");
-      const { error: updateError } = await supabase
-        .from("products")
-        .update({
-          name: newName,
-          description: newDesc,
-          price: parseFloat(newPrice),
-          stock: parseInt(newStock),
-          status: newStatus,
-          image_url: newImageUrl || product.image_url,
-        })
-        .eq("id", id);
-      if (updateError) {
-        alert("❌ Failed to update product: " + updateError.message);
-      } else {
-        alert("✅ Product updated!");
-        fetchProducts();
-      }
-    };
-    fileInput.click();
-  } catch (e) {
-    console.error("❌ editProduct exception:", e);
-  }
-};
-
-// -------------------- SETTINGS -------------------- //
 async function fetchDeliveryFee() {
-  const el = document.getElementById("deliveryFee");
-  if (!el) return;
-
+  if (!supabase) return;
   try {
-    const { data, error } = await supabase
-      .from("settings")
-      .select("*")
-      .eq("key", "delivery_fee")
-      .limit(1);
+    const el = document.getElementById("deliveryFee");
+    if (!el) return;
+    const { data, error } = await supabase.from("settings").select("*").eq("key", "delivery_fee").limit(1);
+    if (error) { console.warn("fetchDeliveryFee error:", error); return; }
+    if (data && data.length > 0) el.value = data[0].value;
+  } catch (e) { console.error("fetchDeliveryFee:", e); }
+}
 
-    if (error) {
-      console.error("❌ Failed to fetch delivery fee:", error.message);
+async function fetchBanner() {
+  if (!supabase) return;
+  try {
+    const preview = document.getElementById("bannerPreview");
+    if (!preview) return;
+    const { data, error } = await supabase.from("banners").select("*").order("created_at", { ascending: false }).limit(1);
+    if (error) { console.warn("fetchBanner error:", error); return; }
+    if (data && data.length > 0) preview.innerHTML = '<img src="' + escapeHtml(data[0].image_url || "") + '" width="200" /> <p><strong>' + escapeHtml(data[0].title || "") + '</strong></p>';
+    else preview.innerHTML = "<p>No banner uploaded yet.</p>";
+  } catch (e) { console.error("fetchBanner:", e); }
+  // ---------- Robust delegated handlers for Show Items / Print Invoice
+(function attachDelegatedHandlers() {
+  const container = document.getElementById("ordersContainer");
+  if (!container) {
+    console.warn("ordersContainer not found — delegated handlers not attached");
+    return;
+  }
+
+  container.addEventListener("click", (ev) => {
+    const btn = ev.target.closest("button");
+    if (!btn) return;
+
+    // ---------- SHOW / HIDE ITEMS
+    const text = (btn.textContent || "").trim().toLowerCase();
+
+    if (text.startsWith("show items") || text.startsWith("hide items")) {
+      // find the nearest order card
+      const card = btn.closest(".order-card");
+      if (!card) {
+        console.warn("toggle: order-card not found for button", btn);
+        return;
+      }
+
+      // Prefer explicit items block id; fallback to .items-container inside card
+      let itemsBlock = null;
+      // try id pattern items-block-<id> if present on card id
+      const cardId = card.id; // expected order-<id>
+      if (cardId && cardId.startsWith("order-")) {
+        const idPart = cardId.slice("order-".length);
+        itemsBlock = document.getElementById(`items-block-${idPart}`);
+      }
+      if (!itemsBlock) itemsBlock = card.querySelector(".items-container");
+      if (!itemsBlock) {
+        console.warn("toggle: items container not found inside card", card);
+        return;
+      }
+
+      const isOpen = itemsBlock.classList.toggle("open");
+      btn.textContent = isOpen ? "Hide Items" : "Show Items";
       return;
     }
 
-    if (data && data.length > 0) {
-      el.value = data[0].value;
-    }
-  } catch (e) {
-    console.error("❌ fetchDeliveryFee exception:", e);
-  }
-}
+    // ---------- PRINT INVOICE
+    if (text.startsWith("print invoice")) {
+      // find nearest order card
+      const card = btn.closest(".order-card");
+      if (!card) return console.warn("print: order-card not found");
 
-if (document.getElementById("deliveryFeeForm")) {
-  document.getElementById("deliveryFeeForm").addEventListener("submit", async (e) => {
-    e.preventDefault();
-    const feeEl = document.getElementById("deliveryFee");
-    if (!feeEl) return;
-    const fee = feeEl.value;
-    try {
-      const { error } = await supabase
-        .from("settings")
-        .upsert([{ key: "delivery_fee", value: fee }], { onConflict: "key" });
-      if (error) {
-        alert("❌ Failed to save delivery fee: " + error.message);
-      } else {
-        alert("✅ Delivery fee updated!");
+      const title = card.querySelector("h3")?.textContent || "Order";
+      const meta = card.querySelectorAll(".meta div");
+      const name = meta[0]?.textContent || "";
+      const phone = meta[1]?.textContent || "";
+      const address = meta[2]?.textContent || "";
+      const itemsBlock = card.querySelector(".order-items");
+      const itemsHTML = itemsBlock ? itemsBlock.outerHTML : "<p>No items</p>";
+      const totalEl = card.querySelector(".order-header [style]")?.textContent || "";
+
+      // open print window and write HTML safely (avoid template literal injections)
+      const win = window.open("", "_blank", "width=800,height=900");
+      if (!win) {
+        console.warn("Could not open print window (blocked?)");
+        return;
       }
-    } catch (e) {
-      console.error("❌ save delivery fee exception:", e);
+
+      const escapeHtml = (s) => {
+        if (s === null || s === undefined) return "";
+        return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
+      };
+
+      const html =
+        "<!doctype html><html><head><meta charset='utf-8'><title>" + escapeHtml(title) + "</title>" +
+        "<style>body{font-family:Arial;padding:16px}.line{display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px dashed #ddd;}</style>" +
+        "</head><body>" +
+        "<h2>" + escapeHtml(title) + "</h2>" +
+        "<div class='line'><strong>Customer</strong><div>" + escapeHtml(name) + "</div></div>" +
+        "<div class='line'><strong>Phone</strong><div>" + escapeHtml(phone) + "</div></div>" +
+        "<div class='line'><strong>Address</strong><div>" + escapeHtml(address) + "</div></div>" +
+        "<h3>Items</h3>" + itemsHTML +
+        "<h3>Total</h3><div class='line'><strong>Total</strong><div>" + escapeHtml(totalEl) + "</div></div>" +
+        "<script>window.onload=function(){setTimeout(()=>window.print(),200);};</script>" +
+        "</body></html>";
+
+      win.document.open();
+      win.document.write(html);
+      win.document.close();
+      return;
     }
   });
-  fetchDeliveryFee();
+})();
+
 }
-
-// -------------------- BANNERS -------------------- //
-
-// Fetch the latest banner
-async function fetchBanner() {
-  try {
-    const { data, error } = await supabase
-      .from("banners")
-      .select("*")
-      .order("created_at", { ascending: false })
-      .limit(1);
-
-    if (error) {
-      console.error("❌ Failed to fetch banner:", error.message);
-      return;
-    }
-
-    if (data && data.length > 0) {
-      const banner = data[0];
-      document.getElementById("bannerPreview").innerHTML = `
-        <img src="${banner.image_url}" width="200" alt="Banner" />
-        <p><strong>${banner.title}</strong></p>
-      `;
-    } else {
-      document.getElementById("bannerPreview").innerHTML =
-        "<p>No banner uploaded yet.</p>";
-    }
-  } catch (err) {
-    console.error("❌ fetchBanner exception:", err);
-  }
-}
-
-// Upload new banner
-if (document.getElementById("bannerForm")) {
-  document
-    .getElementById("bannerForm")
-    .addEventListener("submit", async (e) => {
-      e.preventDefault();
-      const file = document.getElementById("bannerImage").files[0];
-      if (!file) return;
-
-      const fileName = `banners/${Date.now()}_${file.name}`;
-      const { error: uploadError } = await supabase.storage
-        .from("minutt-media")
-        .upload(fileName, file, { upsert: true });
-
-      if (uploadError) {
-        alert("❌ Failed to upload banner: " + uploadError.message);
-        return;
-      }
-
-      const { data: urlData } = supabase.storage
-        .from("minutt-media")
-        .getPublicUrl(fileName);
-
-      const image_url = urlData.publicUrl;
-
-      const { error } = await supabase
-        .from("banners")
-        .upsert([
-          {
-            title: "Home Banner",
-            image_url: image_url,
-            is_active: true,
-            created_at: new Date(),
-          },
-        ]);
-
-      if (error) {
-        alert("❌ Failed to save banner: " + error.message);
-        return;
-      }
-
-      alert("✅ Banner updated!");
-      fetchBanner();
-    });
-
-  fetchBanner();
-}
-
-// -------------------- INITIAL LOADS -------------------- //
-fetchCategories();
-fetchOrders();
-fetchProducts();
-fetchCategoriesDropdown();
-fetchBanner();
-fetchDeliveryFee();
