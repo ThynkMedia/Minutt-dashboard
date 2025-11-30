@@ -122,6 +122,10 @@ async function renderOrders(orders) {
     const domId = `order-${order.id}`;
     const total = order.order_amount ?? order.total ?? 0;
     const isDelivered = order.status === "delivered";
+    fetchOrdersFromServer({ render: true }).then(() => {
+  startBackgroundPoll();
+});
+
 
     // build items HTML
     let itemsHtml = "";
@@ -206,6 +210,87 @@ async function fetchOrdersFromServer({ render = true } = {}) {
       }
       return [];
     }
+    // ---------- Option C: smart background poll (non-intrusive)
+// Plays sound instantly, shows small toast (no alert), and re-renders only when new order arrives.
+// It avoids re-rendering while user is interacting with inputs.
+let _optionC_pollHandle = null;
+const _optionC_POLL_MS = 5000; // poll interval (ms)
+let _optionC_lastTopId = lastSeenTopId;
+
+// start background poll (Option C)
+function startBackgroundPoll() {
+  // clear any existing
+  if (_optionC_pollHandle) clearInterval(_optionC_pollHandle);
+
+  _optionC_pollHandle = setInterval(async () => {
+    try {
+      if (!supabase) return;
+
+      // check only top-most id — lightweight query
+      const { data: rows, error } = await supabase
+        .from("orders")
+        .select("id, order_number, created_at")
+        .order("created_at", { ascending: false })
+        .limit(1);
+
+      if (error) {
+        console.warn("OptionC poll error:", error);
+        return;
+      }
+
+      const topId = rows && rows.length ? (rows[0].id || rows[0].order_number) : null;
+
+      // detect user interaction: do NOT re-render while user typing/selecting
+      const userInteracting = document.activeElement && ["INPUT", "TEXTAREA", "SELECT"].includes(document.activeElement.tagName);
+
+      // if first run, initialize last id but DON'T fire a notification
+      if (_optionC_lastTopId == null) {
+        _optionC_lastTopId = topId;
+        lastSeenTopId = topId; // keep in sync with existing variable
+        return;
+      }
+
+      // If top id changed and user is NOT interacting -> new order arrived
+      if (topId && topId !== _optionC_lastTopId && !userInteracting) {
+        _optionC_lastTopId = topId;
+        lastSeenTopId = topId;
+
+        // play the sound immediately (non-blocking)
+        const audioEl = document.getElementById("newOrderAudio");
+        if (audioEl) {
+          audioEl.currentTime = 0;
+          audioEl.play().catch((err) => {
+            // if blocked, show enable sound button if present
+            console.warn("Playback blocked:", err);
+            const btn = document.getElementById("enableSoundBtn");
+            if (btn) btn.style.display = "inline-block";
+          });
+        }
+
+        // small toast (non-blocking)
+        try { showToast("🔔 New order received"); } catch (e) {}
+
+        // re-fetch & render orders
+        try {
+          await fetchOrdersFromServer({ render: true });
+        } catch (e) {
+          console.error("OptionC fetchOrdersFromServer failed:", e);
+        }
+      }
+    } catch (err) {
+      console.error("OptionC polling exception:", err);
+    }
+  }, _optionC_POLL_MS);
+}
+
+// Helper to stop polling (if needed)
+function stopBackgroundPoll() {
+  if (_optionC_pollHandle) {
+    clearInterval(_optionC_pollHandle);
+    _optionC_pollHandle = null;
+  }
+}
+
 
     const topId = orders && orders.length ? (orders[0].id || orders[0].order_number) : null;
     if (render) {
@@ -231,6 +316,105 @@ function startBackgroundPoll() {
       if (topId && topId !== lastSeenTopId && !userInteracting) {
         // play sound + toast only (no blocking alert)
         const audio = document.getElementById("newOrderAudio");
+        // ---------- Mobile autoplay / audio resume helper ----------
+// Paste this after your audio <audio id="newOrderAudio"> exists and after any gain/AudioContext setup.
+
+(function setupMobileAudioResume() {
+  const audioEl = document.getElementById("newOrderAudio");
+  if (!audioEl) return;
+
+  // Ensure playsinline attribute for iOS
+  audioEl.setAttribute("playsinline", "");
+  audioEl.setAttribute("webkit-playsinline", "");
+
+  // Create (or reuse) AudioContext + GainNode if not already created
+  // If you already created ctx/gain earlier, reuse them by checking window._minuttAudioCtx
+  let ctx = window._minuttAudioCtx || null;
+  let gain = window._minuttGainNode || null;
+  try {
+    if (!ctx) {
+      ctx = new (window.AudioContext || window.webkitAudioContext)();
+      window._minuttAudioCtx = ctx;
+    }
+    if (!gain) {
+      const src = ctx.createMediaElementSource(audioEl);
+      gain = ctx.createGain();
+      gain.gain.value = 1.0; // change if you used amplification earlier (e.g. 2.0)
+      src.connect(gain).connect(ctx.destination);
+      window._minuttGainNode = gain;
+    }
+  } catch (e) {
+    // createMediaElementSource may throw if audio element already connected; ignore
+    console.warn("AudioContext creation issue (safe to ignore if already connected):", e);
+  }
+
+  // Helper to attempt playing a short silent sound to check autoplay permission
+  async function tryPlayTestSound() {
+    try {
+      // small friendly beep or just try to play audioEl for a tiny fraction
+      audioEl.currentTime = 0;
+      // Do not call play() repeatedly; this is just a permission probe
+      await audioEl.play();
+      audioEl.pause();
+      return true;
+    } catch (err) {
+      return false;
+    }
+  }
+
+  // Called after user gesture to resume the audio context & enable future audio
+  async function resumeAudioFromGesture() {
+    try {
+      if (ctx && ctx.state === "suspended") {
+        await ctx.resume();
+      }
+    } catch (e) {
+      console.warn("AudioContext resume failed:", e);
+    }
+    // Try to play a tiny probe to ensure audio will play later
+    try {
+      audioEl.currentTime = 0;
+      await audioEl.play().catch(()=>{});
+      audioEl.pause();
+    } catch (e) {
+      // ignore
+    }
+
+    // hide enable button if present
+    const btn = document.getElementById("enableSoundBtn");
+    if (btn) btn.style.display = "none";
+
+    // remove one-time listeners
+    window.removeEventListener("touchstart", resumeAudioFromGesture, {passive:true});
+    window.removeEventListener("click", resumeAudioFromGesture, {passive:true});
+  }
+
+  // On mobile browsers, test whether auto-play is allowed
+  (async () => {
+    const ok = await tryPlayTestSound();
+    if (ok) {
+      // autoplay allowed; no UI needed
+      const btn = document.getElementById("enableSoundBtn");
+      if (btn) btn.style.display = "none";
+      return;
+    }
+
+    // autoplay blocked: show enable button and also attach global first-touch resume
+    const btn = document.getElementById("enableSoundBtn");
+    if (btn) {
+      btn.style.display = "inline-block";
+      btn.addEventListener("click", async () => {
+        await resumeAudioFromGesture();
+        showToast("Sound enabled");
+      });
+    }
+
+    // Also resume on first touch/click anywhere (helpful: user might tap elsewhere)
+    window.addEventListener("touchstart", resumeAudioFromGesture, {passive:true});
+    window.addEventListener("click", resumeAudioFromGesture, {passive:true});
+  })();
+})();
+
         if (audio) { audio.currentTime = 0; audio.play().catch(()=>{}); }
         showToast("🔔 New order received!");
         // re-render orders
